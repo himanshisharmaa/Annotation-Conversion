@@ -68,6 +68,11 @@ class COCOConverter(AnnotationConverter):
                     ET.SubElement(bndbox,"ymin").text=str(ymin)
                     ET.SubElement(bndbox,"xmax").text=str(xmax)
                     ET.SubElement(bndbox,"ymax").text=str(ymax)
+
+                    if 'segmentation' in ann and ann['segmentation']:
+                        polygon = ann['segmentation'][0]
+                        polygon_points = ' '.join([f'{x},{y}' for x, y in zip(polygon[0::2], polygon[1::2])])
+                        ET.SubElement(obj, "polygon").text = polygon_points
             annotations.append(ET.ElementTree(annotation))
         return annotations
     
@@ -84,6 +89,7 @@ class COCOConverter(AnnotationConverter):
             height=bbox[3]/image['height']
             yolo_annotation=f"{class_index} {x_center:.3f} {y_center:.3f} {width:.3f} {height:.3f}"
             yolo_annotations.append((image['file_name'],yolo_annotation))
+       
         return yolo_annotations
     
     def save_data(self,annotations,target_format):
@@ -92,21 +98,37 @@ class COCOConverter(AnnotationConverter):
                 xml_output_path=os.path.join(self.output_dir,os.path.splitext(annotation.find('filename').text)[0]+".xml")
                 annotation.write(xml_output_path)
         elif target_format=="YOLO":
-            yolo_output_path=os.path.join(self.output_dir,os.path.splitext(os.path.basename(self.input_file))[0]+'.txt')
-            with open(yolo_output_path,'w') as f:
-                    for data in annotations:
-                        f.write(data[-1]+'\n')
+            annotations_by_image = {}
+            for filename, yolo_annotation in annotations:
+                if filename not in annotations_by_image:
+                    annotations_by_image[filename] = []
+                annotations_by_image[filename].append(yolo_annotation)
+            # yolo_output_path=os.path.join(self.output_dir,os.path.splitext(os.path.basename(self.input_file))[0]+'.txt')
+            # with open(yolo_output_path,'w') as f:
+            #         for data in annotations:
+            #             f.write(data[-1]+'\n')
+            for filename, yolo_annotations in annotations_by_image.items():
+                yolo_output_path = os.path.join(self.output_dir, os.path.splitext(filename)[0] + '.txt')
+                with open(yolo_output_path, 'w') as f:
+                    for annotation in yolo_annotations:
+                        f.write(annotation + '\n')
+
 
 class PASCALVOCCOnverter(AnnotationConverter):
     def __init__(self, input_file, output_dir, starting_image_id=1, starting_annotation_id=1):
         super().__init__(input_file, output_dir)
         self.image_id = starting_image_id
         self.annotation_id = starting_annotation_id
+        self.image_data = []
+        self.annotation_data = []
+        self.category_map = {}
+        self.output_file = os.path.join(self.output_dir, 'coco_annotations.json')
 
     def load_data(self):
         tree=ET.parse(self.input_file)
         root=tree.getroot()
         self.data=root
+        print(self.data)
     
     def convert_to(self,target_format,**kwargs):
         if target_format=='COCO':
@@ -117,68 +139,143 @@ class PASCALVOCCOnverter(AnnotationConverter):
             return ValueError(f"Unsupported format {target_format}")
     
     def convert_to_coco(self):
-        coco_data = {
-            "info": {
-                "year": 2024,
-                "version": "1.0",
-                "description": "Converted COCO dataset",
-                "contributor": "Himanshi Sharma",
-                "url": "http://example.com",
-                "date_created": "2024-09-01"
-            },
-            "licenses": [{
-                "id": 1,
-                "name": "Attribution-NonCommercial",
-                "url": "http://creativecommons.org/licenses/by-nc/2.0/"
-            }],
-            "images": [],
-            "annotations": [],
-            "categories": []
-        }
-        category_map={}
-        for obj in self.data.findall("object"):
-            class_name=obj.find('name').text
-            if class_name not in category_map:
-                category_map[class_name]=len(category_map)+1
-                coco_data["categories"].append({
-                    "id":category_map[class_name],
-                    "name":class_name,
-                    "supercategory":class_name
-                })
-        filename=self.data.find('filename').text
-        size=self.data.find('size')
-        width=int(size.find('width').text)
-        height=int(size.find('height').text)
+        # for obj in self.data.findall("object"):
+        #     class_name=obj.find('name').text
+        #     if class_name not in self.category_map:
+        #         self.category_map[class_name]=len(self.category_map)+1
+        #         self.coco_data["categories"].append({
+        #             "id":self.category_map[class_name],
+        #             "name":class_name,
+        #             "supercategory":class_name
+        #         })
+        # filename=self.data.find('filename').text
+        # size=self.data.find('size')
+        # width=int(size.find('width').text)
+        # height=int(size.find('height').text)
 
-        coco_data['images'].append({
-            "id":self.image_id,
-            "file_name":filename,
-            "height":height,
-            "date_captured": "2024-08-30"
-        })
-        for obj in self.data.findall("object"):
-            class_name=obj.find('name').text
-            bndbox=obj.find('bndbox')
-            xmin=int(bndbox.find('xmin').text)
-            ymin=int(bndbox.find('ymin').text)
-            xmax=int(bndbox.find('xmax').text)
-            ymax=int(bndbox.find('ymax').text)
-            bbox=[xmin,ymin,xmax-xmin,ymax-ymin]
-            area=(xmax-xmin)*(ymax-ymin)
+        # self.coco_data['images'].append({
+        #     "id":self.image_id,
+        #     "file_name":filename,
+        #     "width":width,
+        #     "height":height,
+        #     "date_captured": "2024-08-30"
+        # })
+        # for obj in self.data.findall("object"):
+        #     class_name=obj.find('name').text
+        #     bndbox=obj.find('bndbox')
+        #     xmin=int(bndbox.find('xmin').text)
+        #     ymin=int(bndbox.find('ymin').text)
+        #     xmax=int(bndbox.find('xmax').text)
+        #     ymax=int(bndbox.find('ymax').text)
+        #     bbox=[xmin,ymin,xmax-xmin,ymax-ymin]
+        #     area=(xmax-xmin)*(ymax-ymin)
 
-            coco_data['annotations'].append({
-                "id":self.annotation_id,
-                "image_id":self.image_id,
-                "category_id":category_map[class_name],
-                "bbox":bbox,
-                "area":area,
-                "segmentation":[],
-                "iscrowd":0,
-            })
-            self.annotation_id+=1
-        self.image_id+=1
-        return coco_data
-    
+        #     self.coco_data['annotations'].append({
+        #         "id":self.annotation_id,
+        #         "image_id":self.image_id,
+        #         "category_id":self.category_map[class_name],
+        #         "bbox":bbox,
+        #         "area":area,
+        #         "segmentation":[],
+        #         "iscrowd":0,
+        #     })
+        #     self.annotation_id+=1
+        # self.image_id+=1
+        # return self.coco_data
+        # print(self.input_file)
+        
+        if not os.path.isfile(self.output_file):
+            coco_data = {
+                "info": {
+                    "year": 2024,
+                    "version": "1.0",
+                    "description": "Converted COCO dataset",
+                    "contributor": "Himanshi Sharma",
+                    "url": "http://example.com",
+                    "date_created": "2024-09-01"
+                },
+                "licenses": [{
+                    "id": 1,
+                    "name": "Attribution-NonCommercial",
+                    "url": "http://creativecommons.org/licenses/by-nc/2.0/"
+                }],
+                "images": [],
+                "annotations": [],
+                "categories": []
+            }
+            with open(self.output_file, 'w') as f:
+                json.dump(coco_data, f, indent=4)
+
+        # Load existing COCO data
+        with open(self.output_file, 'r+') as f:
+            coco_data = json.load(f)
+            self.category_map = {cat['name']: cat['id'] for cat in coco_data['categories']}
+            image_id_map = {}
+            # Initialize or update category map
+            for obj in self.data.findall("object"):
+                class_name = obj.find('name').text
+                if class_name not in self.category_map:
+                    category_id = len(coco_data['categories']) + 1
+                    self.category_map[class_name] = category_id
+                    coco_data['categories'].append({
+                        "id": category_id,
+                        "name": class_name,
+                        "supercategory": class_name
+                    })
+
+            # Process and append image and annotation data
+            filename = self.data.find('filename').text
+            if filename not in image_id_map:
+                size = self.data.find('size')
+                width = int(size.find('width').text)
+                height = int(size.find('height').text)
+
+                image_id = len(coco_data['images']) + 1 
+                image_id_map[filename] = image_id
+
+                image_entry = {
+                    "id": image_id,
+                    "file_name": filename,
+                    "width": width,
+                    "height": height,
+                    "date_captured": "2024-08-30"
+
+                }
+                coco_data['images'].append(image_entry)
+            else:
+                image_id = image_id_map[filename]
+            
+            for obj in self.data.findall("object"):
+                class_name = obj.find('name').text
+                bndbox = obj.find('bndbox')
+                xmin = int(bndbox.find('xmin').text)
+                ymin = int(bndbox.find('ymin').text)
+                xmax = int(bndbox.find('xmax').text)
+                ymax = int(bndbox.find('ymax').text)
+                bbox = [xmin, ymin, xmax - xmin, ymax - ymin]
+                area = (xmax - xmin) * (ymax - ymin)
+
+                segmentation = []
+                if 'segmentation' in obj.attrib and obj.find('segmentation').text:
+                # Convert segmentation data if available
+                    segmentation = [list(map(float, obj.find('segmentation').text.split()))]
+
+                annotation_entry = {
+                "id": len(coco_data['annotations']) + 1,
+                "image_id": image_id,
+                "category_id": self.category_map[class_name],
+                "bbox": bbox,
+                "area": area,
+                "segmentation": segmentation,
+                "iscrowd": 0,
+                }               
+                coco_data['annotations'].append(annotation_entry)
+            # Write updated data back to file
+            f.seek(0)
+            f.truncate()
+            json.dump(coco_data, f, indent=4)
+
+
     def convert_to_yolo(self):
         yolo_annotations=[]
         size=self.data.find('size')
@@ -210,12 +307,8 @@ class PASCALVOCCOnverter(AnnotationConverter):
         return yolo_annotations
     
     def save_data(self,annotations,target_format):
-        if target_format=="COCO":
-            output_file=os.path.join(output_dir,os.path.splitext(os.path.basename(self.input_file))[0]+".json")
-            with open(output_file,"w") as f:
-                json.dump(annotations,f,indent=4)
-
-        elif target_format=="YOLO":
+           
+        if target_format=="YOLO":
             output_file=os.path.join(self.output_dir,os.path.splitext(os.path.basename(self.input_file))[0]+'.txt')
             with open(output_file,"w") as f:
                 for annotation in annotations:
@@ -253,7 +346,7 @@ class YOLOConverter(AnnotationConverter):
         
         height, width = image.shape[:2]
         print(f"Image size: width={width}, height={height}")
-        return width, height
+        return width, height,image_file
         
 
 
@@ -277,38 +370,111 @@ class YOLOConverter(AnnotationConverter):
         else:
             raise ValueError(f"Unsupported target format: {target_format}")
         
-    def convert_to_coco(self):
-        width, height = self.get_size()
-        class_to_index=self.load_classes()
-        coco_data={
-             "info": {
-                "year": 2024,
-                "version": "1.0",
-                "description": "Converted COCO dataset",
-                "contributor": "Himanshi Sharma",
-                "url": "http://example.com",
-                "date_created": "2024-09-01"
-            },
-            "licenses": [{
-                "id": 1,
-                "name": "Attribution-NonCommercial",
-                "url": "http://creativecommons.org/licenses/by-nc/2.0/"
-            }],
-            "images": [],
-            "annotations": [],
-            "categories": []
-        }
+    # def convert_to_coco(self):
+    #     width, height = self.get_size()
+    #     class_to_index=self.load_classes()
+    #     coco_data={
+    #          "info": {
+    #             "year": 2024,
+    #             "version": "1.0",
+    #             "description": "Converted COCO dataset",
+    #             "contributor": "Himanshi Sharma",
+    #             "url": "http://example.com",
+    #             "date_created": "2024-09-01"
+    #         },
+    #         "licenses": [{
+    #             "id": 1,
+    #             "name": "Attribution-NonCommercial",
+    #             "url": "http://creativecommons.org/licenses/by-nc/2.0/"
+    #         }],
+    #         "images": [],
+    #         "annotations": [],
+    #         "categories": []
+    #     }
 
-        for image_file in set([os.path.splitext(os.path.basename(self.input_file))[0]]):
-            coco_data["images"].append({
-                "id":self.image_id,
-                "file_name":image_file,
-                "height":height,
-                "width":width,
-                "date_captured": "2024-08-30"
+    #     for image_file in set([os.path.splitext(os.path.basename(self.input_file))[0]]):
+    #         coco_data["images"].append({
+    #             "id":self.image_id,
+    #             "file_name":image_file,
+    #             "height":height,
+    #             "width":width,
+    #             "date_captured": "2024-08-30"
 
-            })
+    #         })
         
+    #     for line in self.data:
+    #         class_idx, x_center, y_center, bbox_width, bbox_height = map(float, line.split())
+    #         x_min = (x_center - bbox_width / 2) * width
+    #         y_min = (y_center - bbox_height / 2) * height
+    #         bbox_width = bbox_width * width
+    #         bbox_height = bbox_height * height
+
+    #         coco_data["annotations"].append({
+    #             "id": self.annotation_id,
+    #             "image_id": self.image_id,
+    #             "category_id": int(class_idx),
+    #             "bbox": [x_min, y_min, bbox_width, bbox_height],
+    #             "area": bbox_width * bbox_height,
+    #             "segmentation": [],
+    #             "iscrowd": 0
+    #         })
+    #         self.annotation_id += 1
+            
+    #     coco_data['categories'] = [{"id": idx, "name": name, "supercategory": name} for name, idx in class_to_index.items()]
+    #     self.image_id+=1
+    def convert_to_coco(self):
+    # Output file path
+        coco_output_file = os.path.join(self.output_dir, "converted_coco_dataset.json")
+
+        # Load existing COCO data if the file exists
+        if os.path.exists(coco_output_file):
+            with open(coco_output_file, "r") as f:
+                coco_data = json.load(f)
+        else:
+            # Initialize COCO data structure if file does not exist
+            coco_data = {
+                "info": {
+                    "year": 2024,
+                    "version": "1.0",
+                    "description": "Converted COCO dataset",
+                    "contributor": "Himanshi Sharma",
+                    "url": "http://example.com",
+                    "date_created": "2024-09-01"
+                },
+                "licenses": [{
+                    "id": 1,
+                    "name": "Attribution-NonCommercial",
+                    "url": "http://creativecommons.org/licenses/by-nc/2.0/"
+                }],
+                "images": [],
+                "annotations": [],
+                "categories": []
+            }
+
+        # Track maximum IDs to avoid conflicts
+        existing_image_ids = {img['id'] for img in coco_data['images']}
+        existing_annotation_ids = {ann['id'] for ann in coco_data['annotations']}
+        
+        if existing_image_ids:
+            self.image_id = max(existing_image_ids) + 1
+        if existing_annotation_ids:
+            self.annotation_id = max(existing_annotation_ids) + 1
+        
+        # Get image size
+        width, height,img_file = self.get_size()
+        image_file = os.path.splitext(os.path.basename(self.input_file))[0] + ".jpg"
+
+        # Add new image if not already present
+        if not any(img['file_name'] == image_file for img in coco_data['images']):
+            coco_data["images"].append({
+                "id": self.image_id,
+                "file_name": image_file,
+                "height": height,
+                "width": width,
+                "date_captured": "2024-08-30"
+            })
+
+        # Append annotations
         for line in self.data:
             class_idx, x_center, y_center, bbox_width, bbox_height = map(float, line.split())
             x_min = (x_center - bbox_width / 2) * width
@@ -326,19 +492,32 @@ class YOLOConverter(AnnotationConverter):
                 "iscrowd": 0
             })
             self.annotation_id += 1
-            
-        coco_data['categories'] = [{"id": idx, "name": name, "supercategory": name} for name, idx in class_to_index.items()]
-        self.image_id+=1
-        return coco_data
+
+        # Add categories if not already present
+        existing_category_names = {cat['name'] for cat in coco_data['categories']}
+        for name, idx in self.load_classes().items():
+            if name not in existing_category_names:
+                coco_data['categories'].append({
+                    "id": idx,
+                    "name": name,
+                    "supercategory": name
+                })
+
+        # Save updated COCO data
+        with open(coco_output_file, "w") as f:
+            json.dump(coco_data, f, indent=4)
         
+        self.image_id += 1
+
     def convert_to_voc(self):
         annotations = []
-        width, height = self.get_size()
+        width, height,img_file = self.get_size()
         classes = self.load_classes()
         for image_file in set([os.path.splitext(os.path.basename(self.input_file))[0]]):
+            img_file=os.path.basename(img_file)
             annotation = ET.Element('annotation')
             ET.SubElement(annotation, "folder").text = self.output_dir
-            ET.SubElement(annotation, "filename").text = image_file
+            ET.SubElement(annotation, "filename").text = img_file
             size = ET.SubElement(annotation, "size")
             ET.SubElement(size, 'width').text = str(width)  
             ET.SubElement(size, "height").text = str(height)  
@@ -367,17 +546,17 @@ class YOLOConverter(AnnotationConverter):
         return annotations
 
     def save_data(self, annotations, target_format):
-        if target_format == "COCO":
-            output_file = os.path.join(self.output_dir, os.path.splitext(os.path.basename(self.input_file))[0] + ".json")
-            with open(output_file, "w") as f:
-                json.dump(annotations, f, indent=4)
+        # if target_format == "COCO":
+        #     output_file = os.path.join(self.output_dir, os.path.splitext(os.path.basename(self.input_file))[0] + ".json")
+        #     with open(output_file, "w") as f:
+        #         json.dump(annotations, f, indent=4)
 
-        elif target_format == "VOC":
+        if target_format == "VOC":
             for annotation in annotations:
                 xml_output_path = os.path.join(self.output_dir, os.path.splitext(annotation.find('filename').text)[0] + ".xml")
                 annotation.write(xml_output_path)
 
-        
+           
 
 def get_converter(input_file,output_dir,image_dir=None):
     if input_file.endswith('.json'):
